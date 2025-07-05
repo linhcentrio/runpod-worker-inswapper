@@ -18,3 +18,5 @@ tqdm
 yapf
 python-dotenv
 runpod==1.7.10
+minio
+requests

@@ -39,44 +39,52 @@ RUN apt update && \
 # Set working directory
 WORKDIR /workspace
 
-# Install Torch
-RUN pip3 install --no-cache-dir torch==2.6.0+cu124 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+# Install Torch with timeout and retry mechanism
+RUN pip3 install --no-cache-dir --timeout 300 torch==2.6.0+cu124 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124 || \
+    pip3 install --no-cache-dir --timeout 300 torch==2.6.0+cu124 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 
-# Install Inswapper Serverless Worker
+# Install Inswapper Serverless Worker with error handling
 RUN git clone https://github.com/ashleykleynhans/runpod-worker-inswapper.git && \
     cd /workspace/runpod-worker-inswapper && \
-    pip3 install -r requirements.txt && \
+    pip3 install --no-cache-dir --timeout 300 -r requirements.txt && \
     pip3 uninstall -y onnxruntime && \
-    pip3 install onnxruntime-gpu
+    pip3 install --no-cache-dir --timeout 300 onnxruntime-gpu
 
-# Download insightface checkpoints
+# Download insightface checkpoints with retry mechanism
 RUN cd /workspace/runpod-worker-inswapper && \
     mkdir -p checkpoints/models && \
     cd checkpoints && \
-    wget -O inswapper_128.onnx "https://huggingface.co/ashleykleynhans/inswapper/resolve/main/inswapper_128.onnx?download=true" && \
+    wget --timeout=300 --tries=3 -O inswapper_128.onnx "https://huggingface.co/ashleykleynhans/inswapper/resolve/main/inswapper_128.onnx?download=true" && \
     cd models && \
-    wget https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip && \
+    wget --timeout=300 --tries=3 https://github.com/deepinsight/insightface/releases/download/v0.7/buffalo_l.zip && \
     mkdir buffalo_l && \
     cd buffalo_l && \
     unzip ../buffalo_l.zip
 
-# Install CodeFormer
+# Install CodeFormer with error handling
 RUN cd /workspace/runpod-worker-inswapper && \
     git lfs install && \
-    git clone https://huggingface.co/spaces/sczhou/CodeFormer
+    git clone --depth 1 https://huggingface.co/spaces/sczhou/CodeFormer
 
-# Download CodeFormer weights
+# Download CodeFormer weights with retry mechanism
 RUN cd /workspace/runpod-worker-inswapper && \
     mkdir -p CodeFormer/CodeFormer/weights/CodeFormer && \
-    wget -O CodeFormer/CodeFormer/weights/CodeFormer/codeformer.pth "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/codeformer.pth" && \
+    wget --timeout=300 --tries=3 -O CodeFormer/CodeFormer/weights/CodeFormer/codeformer.pth "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/codeformer.pth" && \
     mkdir -p CodeFormer/CodeFormer/weights/facelib && \
-    wget -O CodeFormer/CodeFormer/weights/facelib/detection_Resnet50_Final.pth "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/detection_Resnet50_Final.pth" && \
-    wget -O CodeFormer/CodeFormer/weights/facelib/parsing_parsenet.pth "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/parsing_parsenet.pth" && \
+    wget --timeout=300 --tries=3 -O CodeFormer/CodeFormer/weights/facelib/detection_Resnet50_Final.pth "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/detection_Resnet50_Final.pth" && \
+    wget --timeout=300 --tries=3 -O CodeFormer/CodeFormer/weights/facelib/parsing_parsenet.pth "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/parsing_parsenet.pth" && \
     mkdir -p CodeFormer/CodeFormer/weights/realesrgan && \
-    wget -O CodeFormer/CodeFormer/weights/realesrgan/RealESRGAN_x2plus.pth "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/RealESRGAN_x2plus.pth"
+    wget --timeout=300 --tries=3 -O CodeFormer/CodeFormer/weights/realesrgan/RealESRGAN_x2plus.pth "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/RealESRGAN_x2plus.pth"
+
+# Create necessary directories and set permissions
+RUN mkdir -p /tmp/inswapper && \
+    chmod 755 /tmp/inswapper
 
 # Copy handler to ensure its the latest
 COPY --chmod=755 handler.py /workspace/runpod-worker-inswapper/handler.py
+
+# Copy schema files
+COPY --chmod=644 schemas/input.py /workspace/runpod-worker-inswapper/schemas/input.py
 
 # Docker container start script
 COPY --chmod=755 start.sh /start.sh

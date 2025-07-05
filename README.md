@@ -101,3 +101,141 @@ are welcome. Bug fixes and new features are encouraged.
 ## Appreciate my work?
 
 <a href="https://www.buymeacoffee.com/ashleyk" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" style="height: 60px !important;width: 217px !important;" ></a>
+
+## Features
+
+- **Face Swapping**: Replace faces in target images with faces from source images
+- **Multiple Face Support**: Handle multiple faces with specific indexing
+- **Face Restoration**: Optional CodeFormer face enhancement
+- **MinIO Integration**: Upload results to MinIO storage
+- **URL Input Support**: Accept images from URLs or base64 encoded data
+- **Flexible Output**: Return base64 encoded images or MinIO URLs
+
+## Input Parameters
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `source_image` | string | Yes | - | Source image (base64 or URL) |
+| `target_image` | string | Yes | - | Target image (base64 or URL) |
+| `source_indexes` | string | No | "-1" | Source face indexes (comma-separated) |
+| `target_indexes` | string | No | "-1" | Target face indexes (comma-separated) |
+| `background_enhance` | boolean | No | true | Enhance background |
+| `face_restore` | boolean | No | true | Apply face restoration |
+| `face_upsample` | boolean | No | true | Upsample face |
+| `upscale` | integer | No | 1 | Upscale factor |
+| `codeformer_fidelity` | float | No | 0.5 | CodeFormer fidelity (0.0-1.0) |
+| `output_format` | string | No | "JPEG" | Output format (JPEG/PNG) |
+| `use_minio_output` | boolean | No | false | Upload result to MinIO |
+
+## Usage Examples
+
+### Basic Face Swap (Base64 Input/Output)
+```json
+{
+  "source_image": "base64_encoded_source_image",
+  "target_image": "base64_encoded_target_image",
+  "source_indexes": "0",
+  "target_indexes": "0",
+  "face_restore": true,
+  "output_format": "JPEG"
+}
+```
+
+### Face Swap with MinIO Output
+```json
+{
+  "source_image": "base64_encoded_source_image",
+  "target_image": "base64_encoded_target_image",
+  "source_indexes": "0",
+  "target_indexes": "0",
+  "face_restore": true,
+  "output_format": "JPEG",
+  "use_minio_output": true
+}
+```
+
+### Face Swap with URL Input
+```json
+{
+  "source_image": "https://example.com/source.jpg",
+  "target_image": "https://example.com/target.jpg",
+  "source_indexes": "0,1",
+  "target_indexes": "0,1",
+  "face_restore": true,
+  "output_format": "PNG",
+  "use_minio_output": true
+}
+```
+
+## Response Format
+
+### Base64 Output
+```json
+{
+  "image": "base64_encoded_result_image",
+  "status": "completed"
+}
+```
+
+### MinIO Output
+```json
+{
+  "image_url": "http://108.181.198.160:9000/aiclipdfl/inswapper_job_id_hash.jpg",
+  "status": "completed"
+}
+```
+
+### Error Response
+```json
+{
+  "error": "Error message",
+  "output": "Full error traceback",
+  "refresh_worker": true
+}
+```
+
+## Face Indexing
+
+- Use `-1` to select all faces
+- Use specific indexes (0, 1, 2, etc.) to select individual faces
+- Faces are ordered from left to right in the image
+- Multiple indexes can be specified as comma-separated values
+
+## MinIO Configuration
+
+The worker is configured to use the following MinIO settings:
+- Endpoint: `108.181.198.160:9000`
+- Bucket: `aiclipdfl`
+- Access Key: `a9TFRtBi8q3Nvj5P5Ris`
+- Secret Key: `fCFngM7YTr6jSkBKXZ9BkfDdXrStYXm43UGa0OZQ`
+
+## Deployment
+
+The worker is designed to run on RunPod serverless with CUDA support. The Dockerfile includes:
+
+- CUDA 12.4.1 with cuDNN
+- PyTorch 2.6.0 with CUDA support
+- InsightFace InSwapper model
+- CodeFormer face restoration
+- MinIO client for storage integration
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Face Detection Failed**: Ensure images contain clear, visible faces
+2. **Download Timeout**: Check network connectivity for URL inputs
+3. **MinIO Upload Failed**: Verify MinIO server accessibility
+4. **Memory Issues**: Reduce image resolution or disable face restoration
+
+### Logs
+
+The worker provides detailed logging for debugging:
+- Face detection results
+- Processing steps
+- Download/upload status
+- Error details
+
+## License
+
+This project is licensed under the MIT License.

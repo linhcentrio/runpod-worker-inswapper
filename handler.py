@@ -8,16 +8,34 @@ import insightface
 import numpy as np
 import traceback
 import runpod
+import requests
 from runpod.serverless.utils.rp_validator import validate
 from runpod.serverless.modules.rp_logger import RunPodLogger
 from typing import List, Union
 from PIL import Image
+from minio import Minio
+from urllib.parse import quote
 from restoration import *
 from schemas.input import INPUT_SCHEMA
 
 FACE_SWAP_MODEL = 'checkpoints/inswapper_128.onnx'
 TMP_PATH = '/tmp/inswapper'
 logger = RunPodLogger()
+
+# MinIO Configuration
+MINIO_ENDPOINT = "108.181.198.160:9000"
+MINIO_ACCESS_KEY = "a9TFRtBi8q3Nvj5P5Ris"
+MINIO_SECRET_KEY = "fCFngM7YTr6jSkBKXZ9BkfDdXrStYXm43UGa0OZQ"
+MINIO_BUCKET = "aiclipdfl"
+MINIO_SECURE = False
+
+# Initialize MinIO client
+minio_client = Minio(
+    MINIO_ENDPOINT,
+    access_key=MINIO_ACCESS_KEY,
+    secret_key=MINIO_SECRET_KEY,
+    secure=MINIO_SECURE
+)
 
 
 # ---------------------------------------------------------------------------- #
@@ -299,6 +317,46 @@ def determine_file_extension(image_data):
     return image_extension
 
 
+def download_file(url: str, local_path: str) -> bool:
+    """Download file from URL with progress tracking"""
+    try:
+        logger.info(f'📥 Downloading {url}')
+        response = requests.get(url, stream=True, timeout=300)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded = 0
+        
+        with open(local_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+        
+        logger.info(f'✅ Downloaded: {local_path} ({downloaded/1024/1024:.1f} MB)')
+        return True
+        
+    except Exception as e:
+        logger.error(f'❌ Download failed: {e}')
+        return False
+
+
+def upload_to_minio(local_path: str, object_name: str) -> str:
+    """Upload file to MinIO with enhanced error handling"""
+    try:
+        if not os.path.exists(local_path):
+            raise FileNotFoundError(f'Local file not found: {local_path}')
+        
+        minio_client.fput_object(MINIO_BUCKET, object_name, local_path)
+        file_url = f'http://{MINIO_ENDPOINT}/{MINIO_BUCKET}/{quote(object_name)}'
+        logger.info(f'✅ Uploaded successfully: {file_url}')
+        return file_url
+        
+    except Exception as e:
+        logger.error(f'❌ Upload failed: {e}')
+        raise e
+
+
 def clean_up_temporary_files(source_image_path: str, target_image_path: str):
     os.remove(source_image_path)
     os.remove(target_image_path)
@@ -309,26 +367,44 @@ def face_swap_api(job_id: str, job_input: dict):
         os.makedirs(TMP_PATH)
 
     unique_id = uuid.uuid4()
-    source_image_data = job_input['source_image']
-    target_image_data = job_input['target_image']
+    source_image_data = job_input.get('source_image')
+    target_image_data = job_input.get('target_image')
+    
+    # Check if input is URL or base64
+    use_minio_output = job_input.get('use_minio_output', False)
+    
+    # Handle source image (URL or base64)
+    if source_image_data.startswith('http'):
+        # Download from URL
+        source_image_path = f'{TMP_PATH}/source_{unique_id}.jpg'
+        if not download_file(source_image_data, source_image_path):
+            return {'error': 'Failed to download source image from URL'}
+    else:
+        # Decode base64
+        source_image = base64.b64decode(source_image_data)
+        source_file_extension = determine_file_extension(source_image_data)
+        source_image_path = f'{TMP_PATH}/source_{unique_id}{source_file_extension}'
+        
+        # Save the source image to disk
+        with open(source_image_path, 'wb') as source_file:
+            source_file.write(source_image)
 
-    # Decode the source image data
-    source_image = base64.b64decode(source_image_data)
-    source_file_extension = determine_file_extension(source_image_data)
-    source_image_path = f'{TMP_PATH}/source_{unique_id}{source_file_extension}'
-
-    # Save the source image to disk
-    with open(source_image_path, 'wb') as source_file:
-        source_file.write(source_image)
-
-    # Decode the target image data
-    target_image = base64.b64decode(target_image_data)
-    target_file_extension = determine_file_extension(target_image_data)
-    target_image_path = f'{TMP_PATH}/target_{unique_id}{target_file_extension}'
-
-    # Save the target image to disk
-    with open(target_image_path, 'wb') as target_file:
-        target_file.write(target_image)
+    # Handle target image (URL or base64)
+    if target_image_data.startswith('http'):
+        # Download from URL
+        target_image_path = f'{TMP_PATH}/target_{unique_id}.jpg'
+        if not download_file(target_image_data, target_image_path):
+            clean_up_temporary_files(source_image_path, '')
+            return {'error': 'Failed to download target image from URL'}
+    else:
+        # Decode base64
+        target_image = base64.b64decode(target_image_data)
+        target_file_extension = determine_file_extension(target_image_data)
+        target_image_path = f'{TMP_PATH}/target_{unique_id}{target_file_extension}'
+        
+        # Save the target image to disk
+        with open(target_image_path, 'wb') as target_file:
+            target_file.write(target_image)
 
     try:
         logger.info(f'Source indexes: {job_input["source_indexes"]}', job_id)
@@ -339,6 +415,7 @@ def face_swap_api(job_id: str, job_input: dict):
         logger.info(f'Upscale: {job_input["upscale"]}', job_id)
         logger.info(f'Codeformer Fidelity: {job_input["codeformer_fidelity"]}', job_id)
         logger.info(f'Output Format: {job_input["output_format"]}', job_id)
+        logger.info(f'Use MinIO Output: {use_minio_output}', job_id)
 
         result_image = face_swap(
             job_id,
@@ -356,9 +433,42 @@ def face_swap_api(job_id: str, job_input: dict):
 
         clean_up_temporary_files(source_image_path, target_image_path)
 
-        return {
-            'image': result_image
-        }
+        # Return result based on output preference
+        if use_minio_output:
+            # Save result to temporary file and upload to MinIO
+            output_filename = f'inswapper_{job_id}_{uuid.uuid4().hex[:8]}.{job_input["output_format"].lower()}'
+            temp_output_path = f'{TMP_PATH}/{output_filename}'
+            
+            # Decode base64 and save to file
+            result_bytes = base64.b64decode(result_image)
+            with open(temp_output_path, 'wb') as f:
+                f.write(result_bytes)
+            
+            # Upload to MinIO
+            try:
+                output_url = upload_to_minio(temp_output_path, output_filename)
+                os.remove(temp_output_path)  # Clean up temp file
+                
+                return {
+                    'image_url': output_url,
+                    'status': 'completed'
+                }
+            except Exception as upload_error:
+                logger.error(f'MinIO upload failed: {upload_error}', job_id)
+                os.remove(temp_output_path)  # Clean up temp file
+                # Fallback to base64
+                return {
+                    'image': result_image,
+                    'status': 'completed',
+                    'minio_upload_failed': True
+                }
+        else:
+            # Return base64 encoded image
+            return {
+                'image': result_image,
+                'status': 'completed'
+            }
+            
     except Exception as e:
         logger.error(f'An exception was raised: {e}', job_id)
         clean_up_temporary_files(source_image_path, target_image_path)

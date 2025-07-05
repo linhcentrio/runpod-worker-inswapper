@@ -50,5 +50,10 @@ INPUT_SCHEMA = {
             'JPEG',
             'PNG'
         ]
+    },
+    'use_minio_output': {
+        'type': bool,
+        'required': False,
+        'default': False  # Default to base64 output
     }
 }
